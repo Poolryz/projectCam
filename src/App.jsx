@@ -1,12 +1,8 @@
-import './App.css'
-import VideoStream from './components/VideoStream/VideoStream.jsx'
+import "./App.css";
+import VideoStream from "./components/VideoStream/VideoStream.jsx";
 
 function App() {
-  return (
-    <>
-      <VideoStream />
-    </>
-  )
+  return <VideoStream />;
 }
 
-export default App
+export default App;

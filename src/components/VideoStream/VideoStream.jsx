@@ -1,164 +1,175 @@
-// VideoStream.jsx
-import { useEffect, useRef, useState } from "react";
-import ImportantInfoPanel from "./ImportantInfoPanel.jsx";
+import { useEffect, useRef, useCallback } from "react";
+import { VideoSocketClient, WS_URL } from "../../api/client.js";
+import { useStore } from "../../store/Zustand.jsx";
+import AlertBanner from "./AlertBanner.jsx";
+import ConfirmBanner from "./ConfirmBanner.jsx";
+import ManualWidthPanel from "./ManualWidthPanel.jsx";
+import StatsPanel from "./StatsPanel.jsx";
 
 const VideoStream = () => {
-  const [isConnected, setIsConnected] = useState(false);
-  const [fps, setFps] = useState(0);
-  const [error, setError] = useState(null);
-  const [useMjpeg] = useState(false); // Переключатель между MJPEG и WebSocket
-  const [lastMeta, setLastMeta] = useState(null);
-  const [lastMetaTimestamp, setLastMetaTimestamp] = useState(null);
+  const wsConnected = useStore((s) => s.wsConnected);
+  const wsStatusText = useStore((s) => s.wsStatusText);
+  const isFlashing = useStore((s) => s.isFlashing);
+  const hasFrame = useStore((s) => s.hasFrame);
 
-  const wsRef = useRef(null);
   const canvasRef = useRef(null);
+  const clientRef = useRef(null);
   const frameCountRef = useRef(0);
-  // eslint-disable-next-line react-hooks/purity
-  const lastTimeRef = useRef(Date.now());
-  const animationRef = useRef(null);
+  const lastFpsTimeRef = useRef(Date.now());
+
+  const sendMsg = useCallback((obj) => {
+    clientRef.current?.send(obj);
+  }, []);
 
   useEffect(() => {
-    const connectWebSocket = () => {
-      try {
-        wsRef.current = new WebSocket("ws://localhost:8000/video/processed/ws");
+    const {
+      setWsConnected,
+      setWsStatusText,
+      setFps,
+      setMeta,
+      setHasFrame,
+      setMonitorState,
+      setExpectedMm,
+      setBounds,
+      setAlertBanner,
+      setConfirmRequest,
+      setIsFlashing,
+    } = useStore.getState();
 
-        wsRef.current.onopen = () => {
-          console.log("WebSocket connected");
-          setIsConnected(true);
-          setError(null);
-          startFrameRequest();
-        };
+    let alertHideTimer = null;
 
-        wsRef.current.onclose = () => {
-          console.log("WebSocket disconnected");
-          setIsConnected(false);
-          // Пытаемся переподключиться через 3 секунды
-          setTimeout(connectWebSocket, 3000);
-        };
+    const showAlert = (text, cssClass, autohideMs = 0) => {
+      clearTimeout(alertHideTimer);
+      setAlertBanner({ text, cssClass });
+      if (autohideMs > 0) {
+        alertHideTimer = setTimeout(() => setAlertBanner(null), autohideMs);
+      }
+    };
 
-        wsRef.current.onerror = (error) => {
-          console.error("WebSocket error:", error);
-          setError("Ошибка WebSocket соединения");
-        };
+    const client = new VideoSocketClient(WS_URL);
+    clientRef.current = client;
 
-        wsRef.current.onmessage = (event) => {
-          const data = JSON.parse(event.data);
+    client.onStatus = ({ connected, text }) => {
+      setWsConnected(connected);
+      setWsStatusText(text);
+      if (!connected) setFps(0);
+    };
 
-          if (data?.type === "measurement") {
-            setLastMeta(data?.meta ?? null);
-            setLastMetaTimestamp(data?.timestamp ?? null);
-            return;
+    client.onMessage = (msg) => {
+      switch (msg.type) {
+        case "frame": {
+          if (!msg.data) break;
+          setHasFrame(true);
+
+          frameCountRef.current += 1;
+          const now = Date.now();
+          if (now - lastFpsTimeRef.current >= 1000) {
+            setFps(frameCountRef.current);
+            frameCountRef.current = 0;
+            lastFpsTimeRef.current = now;
           }
 
-          if (data?.type === "frame" && canvasRef.current) {
-            if (data?.meta && typeof data.meta === "object") {
-              setLastMeta(data.meta);
-              setLastMetaTimestamp(data?.timestamp ?? null);
-            }
+          setMeta(msg.meta ?? {});
 
-            // Обновляем FPS
-            frameCountRef.current += 1;
-            const now = Date.now();
-            if (now - lastTimeRef.current >= 1000) {
-              setFps(frameCountRef.current);
-              frameCountRef.current = 0;
-              lastTimeRef.current = now;
-            }
-
-            // Отображаем кадр через canvas для лучшего контроля
+          if (canvasRef.current) {
             const img = new Image();
             img.onload = () => {
-              const ctx = canvasRef.current.getContext("2d");
-              canvasRef.current.width = img.width;
-              canvasRef.current.height = img.height;
-              ctx.drawImage(img, 0, 0, img.width, img.height);
+              const canvas = canvasRef.current;
+              if (!canvas) return;
+              canvas.width = img.naturalWidth;
+              canvas.height = img.naturalHeight;
+              canvas.getContext("2d").drawImage(img, 0, 0);
             };
-            img.src = `data:image/jpeg;base64,${data.data}`;
+            img.src = `data:image/jpeg;base64,${msg.data}`;
           }
-        };
-      } catch (err) {
-        console.error("Connection error:", err);
-        setError("Не удалось подключиться к серверу");
+          break;
+        }
+
+        case "no_frame":
+          setHasFrame(false);
+          break;
+
+        case "width_confirm_request":
+          setConfirmRequest({
+            suggestedMm: msg.suggested_mm,
+            measuredMm: msg.measured_mm,
+          });
+          setMonitorState("confirming");
+          break;
+
+        case "width_alert": {
+          const dir = msg.direction === "wider" ? "шире нормы" : "уже нормы";
+          const cls = msg.direction === "wider" ? "alert-wider" : "alert-narrower";
+          showAlert(
+            `⚠ Металл ${dir}: ${msg.width_mm} мм (норма ${msg.bounds[0]}–${msg.bounds[1]} мм)`,
+            cls
+          );
+          setIsFlashing(true);
+          break;
+        }
+
+        case "width_back_in_bounds":
+          showAlert(
+            `✔ Металл в норме: ${msg.width_mm} мм (${msg.bounds[0]}–${msg.bounds[1]} мм)`,
+            "alert-ok",
+            4000
+          );
+          setIsFlashing(false);
+          break;
+
+        case "width_monitor_state": {
+          const s = msg.state || "idle";
+          setMonitorState(s);
+          if (msg.expected_mm != null) {
+            setExpectedMm(msg.expected_mm);
+            if (msg.bounds) setBounds(msg.bounds);
+          } else {
+            setExpectedMm(null);
+            setBounds(null);
+          }
+          if (s !== "confirming") setConfirmRequest(null);
+          if (s === "monitoring") {
+            setIsFlashing(false);
+            setAlertBanner(null);
+          }
+          break;
+        }
+
+        default:
+          break;
       }
     };
 
-    const startFrameRequest = () => {
-      const requestFrame = () => {
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          wsRef.current.send("get_frame");
-          animationRef.current = setTimeout(requestFrame, 33); // ~30 FPS
-        }
-      };
-      requestFrame();
-    };
-
-    connectWebSocket();
+    client.connect();
 
     return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-      if (animationRef.current) {
-        clearTimeout(animationRef.current);
-      }
+      clearTimeout(alertHideTimer);
+      client.destroy();
+      clientRef.current = null;
     };
-  }, [useMjpeg]);
-
-  const requestMeasurement = () => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send("get_measurement");
-    }
-  };
+  }, []);
 
   return (
-    <div className="video-stream-container">
-      <div className="video-header">
-        <h2>RTSP Video Stream</h2>
-      </div>
+    <div className="app-layout">
+      <header className="app-header">
+        <div className={`conn-dot${wsConnected ? " connected" : ""}`} />
+        <h1>Мониторинг ширины металла</h1>
+        <span className="status-text">{wsStatusText}</span>
+      </header>
 
-      <div className="status-bar">
-        <div
-          className={`status-indicator ${
-            isConnected ? "connected" : "disconnected"
-          }`}
-        >
-          {isConnected ? "● Подключено" : "○ Отключено"}
+      <AlertBanner />
+      <ConfirmBanner sendMsg={sendMsg} />
+      <ManualWidthPanel sendMsg={sendMsg} />
+
+      <main className="app-main">
+        <div className={`canvas-wrap${isFlashing ? " flashing" : ""}`}>
+          <canvas ref={canvasRef} />
+          {!hasFrame && (
+            <div className="canvas-overlay">Ожидание кадра…</div>
+          )}
         </div>
-        {fps > 0 && <div className="fps-counter">FPS: {fps}</div>}
-        {error && <div className="error-message">⚠ {error}</div>}
-      </div>
-
-      <ImportantInfoPanel
-        apiBaseUrl="http://localhost:8000"
-        wsUrl="ws://localhost:8000/video/processed/ws"
-        isConnected={isConnected}
-        fps={fps}
-        lastMeta={lastMeta}
-        lastMetaTimestamp={lastMetaTimestamp}
-        onRequestMeasurement={requestMeasurement}
-      />
-
-      <div className="video-wrapper">
-        <canvas ref={canvasRef} className="video-player" />
-      </div>
-
-      <div className="info-panel">
-        <h4>Информация о подключении:</h4>
-        <ul>
-          <li>
-            Метод: <strong>{useMjpeg ? "MJPEG" : "WebSocket"}</strong>
-          </li>
-          <li>
-            Сервер: <strong>localhost:8000</strong>
-          </li>
-          <li>
-            Статус:{" "}
-            <span className={isConnected ? "text-success" : "text-error"}>
-              {isConnected ? "Активно" : "Неактивно"}
-            </span>
-          </li>
-        </ul>
-      </div>
+        <StatsPanel />
+      </main>
     </div>
   );
 };
