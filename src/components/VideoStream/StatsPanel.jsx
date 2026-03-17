@@ -16,6 +16,7 @@ const StatsPanel = () => {
   const meta = useStore((s) => s.meta);
   const expectedMm = useStore((s) => s.expectedMm);
   const bounds = useStore((s) => s.bounds);
+  const lampOn = useStore((s) => s.lampOn);
 
   const widthMm = meta?.width_mm_2dp ?? meta?.width_mm;
   const confidence = meta?.confidence;
@@ -56,6 +57,11 @@ const StatsPanel = () => {
         label="Статус"
         value={ok == null ? null : ok ? "OK" : meta?.reason || "ошибка"}
         className={ok == null ? "na" : ok ? "" : "warn"}
+      />
+      <Stat
+        label="Лампа"
+        value={lampOn == null ? null : lampOn ? "Тревога" : "Норма"}
+        className={lampOn == null ? "na" : lampOn ? "warn" : ""}
       />
     </div>
   );

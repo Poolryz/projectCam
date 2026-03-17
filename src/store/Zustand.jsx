@@ -14,6 +14,7 @@ import { create } from "zustand";
  * alertBanner    – { text, cssClass } | null  — баннер тревоги
  * confirmRequest – { suggestedMm, measuredMm } | null  — запрос подтверждения
  * isFlashing     – мигание canvas при выходе за допуск
+ * lampOn         – true (тревога) | false (норма) | null (статус неизвестен)
  */
 const useStore = create((set) => ({
   wsConnected: false,
@@ -27,6 +28,7 @@ const useStore = create((set) => ({
   alertBanner: null,
   confirmRequest: null,
   isFlashing: false,
+  lampOn: null,
 
   setWsConnected: (v) => set({ wsConnected: Boolean(v) }),
   setWsStatusText: (v) => set({ wsStatusText: v }),
@@ -39,6 +41,7 @@ const useStore = create((set) => ({
   setAlertBanner: (v) => set({ alertBanner: v }),
   setConfirmRequest: (v) => set({ confirmRequest: v }),
   setIsFlashing: (v) => set({ isFlashing: v }),
+  setLampOn: (v) => set({ lampOn: v }),
 }));
 
 export { useStore };

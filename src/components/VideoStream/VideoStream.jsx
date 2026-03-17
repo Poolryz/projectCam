@@ -34,6 +34,7 @@ const VideoStream = () => {
       setAlertBanner,
       setConfirmRequest,
       setIsFlashing,
+      setLampOn,
     } = useStore.getState();
 
     let alertHideTimer = null;
@@ -134,6 +135,10 @@ const VideoStream = () => {
           }
           break;
         }
+
+        case "lamp_status":
+          setLampOn(Boolean(msg.lamp_on));
+          break;
 
         default:
           break;

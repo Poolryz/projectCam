@@ -15,8 +15,7 @@
  */
 export class VideoSocketClient {
   /** @param {string} url */
-  constructor(url = "ws://localhost:8000/video/ws") {
-    this.url = url;
+  constructor(url = `ws://${window.location.hostname}:8000/video/ws`) {    this.url = url;
     this._ws = null;
     this._destroyed = false;
     this._reconnectTimer = null;
@@ -102,4 +101,4 @@ export class VideoSocketClient {
 }
 
 /** URL сервера по умолчанию */
-export const WS_URL = "ws://localhost:8000/video/ws";
+export const WS_URL = `ws://${window.location.hostname}:8000/video/ws`;
